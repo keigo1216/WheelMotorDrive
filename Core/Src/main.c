@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include "pid.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,6 +37,10 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+#define ENCODER_RESOLUSION 8391.0f
+#define CIRCUMFERENCE	   (0.06f*3.14f)
+#define INTERRUPT_PERIOD   0.01f	// 100Hz
+#define CONTROL_CYCLE	   0.05f	// 50Hz
 
 /* USER CODE END PM */
 
@@ -44,13 +49,24 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim6;
+TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim16;
 TIM_HandleTypeDef htim17;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+//velocity
+float velocity1;
+float velocity2;
+float velocity3;
+float targetVelocity1;
+float targetVelocity2;
+float targetVelocity3;
+PID pid1;
+PID pid2;
+PID pid3;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -63,17 +79,67 @@ static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM17_Init(void);
+static void MX_TIM6_Init(void);
+static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void Encoder2Velocity(void)
+{
+  // Read Encoder value and reset
+  int16_t Enc_Buff1 = (int16_t)(TIM2->CNT);
+  int16_t Enc_Buff2 = (int16_t)(TIM3->CNT);
+  int16_t Enc_Buff3 = (int16_t)(TIM4->CNT);
+  TIM2->CNT = 0;
+  TIM3->CNT = 0;
+  TIM4->CNT = 0;
+
+  //
+  velocity1 = (Enc_Buff1/ENCODER_RESOLUSION)*CIRCUMFERENCE/INTERRUPT_PERIOD;
+  velocity2 = (Enc_Buff2/ENCODER_RESOLUSION)*CIRCUMFERENCE/INTERRUPT_PERIOD;
+  velocity3 = (Enc_Buff3/ENCODER_RESOLUSION)*CIRCUMFERENCE/INTERRUPT_PERIOD;
+}
+
+void Control(void) {
+  float out = pid_iter(&pid1,velocity1);
+  if (out > 95) out = 90;
+  if (0 <= out && out <= 5) out = 5;
+  if (out < -95) out = -95;
+  if (-5 <= out && out < 0) out = -5;
+
+  if (out >= 0) {
+      out = 100 - out;
+      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, out); // forward
+      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 100);
+  } else {
+      out = 100 + out;
+      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 100); // forward
+      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, out);
+  }
+
+  printf("%f %f %f\r\n", 0.13, velocity1, 0.0);
+//  printf("%f\r\n", out);
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim == &htim6) { // 10Hz
+      Encoder2Velocity();
+//      printf("%f\r\n", velocity1);
+  }
+  if (htim == &htim7) {
+      Control();
+  }
+}
+
 void read_encoder_value(void)
 {
-	uint16_t enc_buff = TIM4->CNT;
-	TIM4->CNT = 0;
-	printf("%d\r\n", enc_buff);
+  uint16_t enc_buff = TIM3->CNT;
+  TIM3->CNT = 0;
+  printf("%d\r\n", enc_buff);
 }
 
 int _write(int file, char *ptr, int len)
@@ -119,18 +185,25 @@ int main(void)
   MX_TIM4_Init();
   MX_TIM16_Init();
   MX_TIM17_Init();
+  MX_TIM6_Init();
+  MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_1);
-  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 80);
-  HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_2);
-  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 100);
-  HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_3);
+  // PWM1
+  HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_1); // backward
+  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 100);
+  HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_2); // forward
+  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 20);
+
+  // PWM2
+  HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_3); // forward
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 100);
-  HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_4);
+  HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_4); // reverse
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, 20);
-  HAL_TIM_PWM_Start_IT(&htim16, TIM_CHANNEL_1);
+
+  // PWM3
+  HAL_TIM_PWM_Start_IT(&htim16, TIM_CHANNEL_1); // forward
   __HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, 100);
-  HAL_TIM_PWM_Start_IT(&htim17, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start_IT(&htim17, TIM_CHANNEL_1); // reverse
   __HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 20);
 
   /* USER CODE END 2 */
@@ -140,11 +213,16 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
+
+  pid_init(&pid1, CONTROL_CYCLE, 2000, 100, 10, 0.13);
+
+  // Start interrupt
+  HAL_TIM_Base_Start_IT(&htim6);
+  HAL_TIM_Base_Start_IT(&htim7);
   while (1)
   {
-//	printf("Hello World\r\n");
-	  read_encoder_value();
-	  HAL_Delay(100);
+//    printf("Hello World\r\n");
+//    Encoder2Velocity();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -420,6 +498,82 @@ static void MX_TIM4_Init(void)
   /* USER CODE BEGIN TIM4_Init 2 */
 
   /* USER CODE END TIM4_Init 2 */
+
+}
+
+/**
+  * @brief TIM6 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM6_Init(void)
+{
+
+  /* USER CODE BEGIN TIM6_Init 0 */
+
+  /* USER CODE END TIM6_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM6_Init 1 */
+
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 15999;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 9;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM6_Init 2 */
+
+  /* USER CODE END TIM6_Init 2 */
+
+}
+
+/**
+  * @brief TIM7 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM7_Init(void)
+{
+
+  /* USER CODE BEGIN TIM7_Init 0 */
+
+  /* USER CODE END TIM7_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM7_Init 1 */
+
+  /* USER CODE END TIM7_Init 1 */
+  htim7.Instance = TIM7;
+  htim7.Init.Prescaler = 15999;
+  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim7.Init.Period = 19;
+  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM7_Init 2 */
+
+  /* USER CODE END TIM7_Init 2 */
 
 }
 
