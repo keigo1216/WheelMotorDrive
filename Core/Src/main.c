@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 #include "pid.h"
 /* USER CODE END Includes */
 
@@ -41,7 +42,12 @@
 #define CIRCUMFERENCE	   (0.06f*3.14f)
 #define INTERRUPT_PERIOD   0.01f	// 100Hz
 #define CONTROL_CYCLE	   0.05f	// 50Hz
-
+#define BUFF_SIZE 200
+#define CHAR_CR 0x0d
+#define TRUE 1
+#define FALSE 0
+#define QUEUESIZE 140
+#define PACKETSIZE 14
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -55,6 +61,7 @@ TIM_HandleTypeDef htim16;
 TIM_HandleTypeDef htim17;
 
 UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
 //velocity
@@ -67,11 +74,29 @@ float targetVelocity3;
 PID pid1;
 PID pid2;
 PID pid3;
+int cur=0;
+
+// DMA Buffer
+typedef union {
+  uint8_t byte[4];
+  float value;
+} U32Bytes;
+uint8_t rxBuffer[PACKETSIZE];
+volatile float inputVel[3];
+
+// Queue
+typedef struct Queue {
+  uint8_t data[QUEUESIZE];
+  int head;
+  int tail;
+} Queue;
+Queue queue;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
@@ -87,8 +112,95 @@ static void MX_TIM7_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+// Queue utils
+void Add_Queue() {
+  memcpy(queue.data+queue.tail, rxBuffer, PACKETSIZE);
+  queue.tail = (queue.tail+PACKETSIZE)%QUEUESIZE;
+}
+
+// search \r\n
+uint8_t* Search_Queue() {
+  if (queue.head == queue.tail) {
+      return NULL;
+  }
+
+  // declare cur and next
+  int cur  = queue.head + 12;
+  int next = (cur+1)%QUEUESIZE;
+
+  // while
+  while(1){
+      // if next==tail
+      	// return NODATA
+      if (next == queue.tail) {
+	  return NULL;
+      }
+      // if find \r\n
+	// update qeueue.head
+        // return cur-12
+      if (queue.data[cur] == '\r' && queue.data[next] == '\n') {
+	  queue.head = (next+1)%QUEUESIZE;
+	  return &queue.data[cur-PACKETSIZE+2];
+      }
+
+      // if no \r\n
+        // update cur and next
+      cur = next;
+      next = (next+1)%QUEUESIZE;
+  }
+}
+
+// DMA callback
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+  if (huart->Instance == USART2) {
+      // add queue
+      if (cur % 2 == 0) {
+      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 10);
+	} else {
+      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 100);
+	}
+      cur++;
+      Add_Queue();
+
+      // search queue
+      while(1) {
+	  uint8_t* ptr = Search_Queue();
+	  if (ptr == NULL) {
+	      break;
+	  }
+
+	  // copy
+	  for (int i=0; i<3; i++) {
+	      U32Bytes tmp;
+	      memcpy(tmp.byte, ptr+i*4, 4);
+	      inputVel[i] = tmp.value;
+	      HAL_UART_Transmit(&huart2,(uint8_t *)tmp.byte,4,10);
+	  }
+	  printf("\r\n");
+      }
+
+
+
+      // while
+	// if not exit \r\n
+      	  // skip
+	// if exit \r\n
+	  // copy inputVel
+
+
+//      for (int i=0; i<3; i++ ) {
+//	  U32Bytes tmp;
+//	  memcpy(tmp.byte, &rxBuffer[i*4], sizeof(float));
+//	  inputVel[i] = tmp.value;
+//      }
+//
+//      printf("%f%f%f\r\n", inputVel[0], inputVel[1], inputVel[2]);
+  }
+}
+
 void Encoder2Velocity(void)
 {
+  volatile U32Bytes outputVel[3];
   // Read Encoder value and reset
   int16_t Enc_Buff1 = (int16_t)(TIM2->CNT);
   int16_t Enc_Buff2 = (int16_t)(TIM3->CNT);
@@ -98,9 +210,18 @@ void Encoder2Velocity(void)
   TIM4->CNT = 0;
 
   //
-  velocity1 = (Enc_Buff1/ENCODER_RESOLUSION)*CIRCUMFERENCE/INTERRUPT_PERIOD;
-  velocity2 = (Enc_Buff2/ENCODER_RESOLUSION)*CIRCUMFERENCE/INTERRUPT_PERIOD;
-  velocity3 = (Enc_Buff3/ENCODER_RESOLUSION)*CIRCUMFERENCE/INTERRUPT_PERIOD;
+  velocity1 = 1.0;
+  velocity2 = -1.0;
+  velocity3 = 10.0;
+
+  outputVel[0].value = velocity1;
+  outputVel[1].value = velocity2;
+  outputVel[2].value = velocity3;
+
+//  HAL_UART_Transmit(&huart2,(uint8_t *)outputVel[0].byte,4,10);
+//  HAL_UART_Transmit(&huart2,(uint8_t *)outputVel[1].byte,4,10);
+//  HAL_UART_Transmit(&huart2,(uint8_t *)outputVel[2].byte,4,10);
+//  printf("\r\n");
 }
 
 void Control(void) {
@@ -120,7 +241,7 @@ void Control(void) {
       __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, out);
   }
 
-  printf("%f %f %f\r\n", 0.13, velocity1, 0.0);
+//  printf("%f %f %f\r\n", 0.13, velocity1, 0.0);
 //  printf("%f\r\n", out);
 }
 
@@ -139,7 +260,7 @@ void read_encoder_value(void)
 {
   uint16_t enc_buff = TIM3->CNT;
   TIM3->CNT = 0;
-  printf("%d\r\n", enc_buff);
+//  printf("%d\r\n", enc_buff);
 }
 
 int _write(int file, char *ptr, int len)
@@ -178,6 +299,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
@@ -219,10 +341,11 @@ int main(void)
   // Start interrupt
   HAL_TIM_Base_Start_IT(&htim6);
   HAL_TIM_Base_Start_IT(&htim7);
+
+  // start DMA
+  HAL_UART_Receive_DMA(&huart2, rxBuffer, PACKETSIZE); // buffersize=12 (32bit * 4 = 12byte)
   while (1)
   {
-//    printf("Hello World\r\n");
-//    Encoder2Velocity();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -748,6 +871,26 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMAMUX1_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMAMUX_OVR_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMAMUX_OVR_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMAMUX_OVR_IRQn);
 
 }
 
