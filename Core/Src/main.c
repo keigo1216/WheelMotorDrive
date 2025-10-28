@@ -65,15 +65,9 @@ DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
 //velocity
-float velocity1;
-float velocity2;
-float velocity3;
-float targetVelocity1;
-float targetVelocity2;
-float targetVelocity3;
-PID pid1;
-PID pid2;
-PID pid3;
+PID pid[3];
+float velocity[3];
+float targetVelocity[3];
 int cur=0;
 
 // DMA Buffer
@@ -82,7 +76,6 @@ typedef union {
   float value;
 } U32Bytes;
 uint8_t rxBuffer[PACKETSIZE];
-volatile float inputVel[3];
 
 // Queue
 typedef struct Queue {
@@ -91,6 +84,16 @@ typedef struct Queue {
   int tail;
 } Queue;
 Queue queue;
+
+typedef struct Motor {
+  PID pid;
+  float velocity;
+  TIM_HandleTypeDef *forwardTim;
+  int forwardTimChannel;
+  TIM_HandleTypeDef *backwardTim;
+  int backwardTimChannel;
+} Motor;
+Motor motor[3];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -154,12 +157,12 @@ uint8_t* Search_Queue() {
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
   if (huart->Instance == USART2) {
       // add queue
-      if (cur % 2 == 0) {
-      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 10);
-	} else {
-      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 100);
-	}
-      cur++;
+//      if (cur % 2 == 0) {
+//       __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 10);
+//	} else {
+//       __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 100);
+//	}
+//      cur++;
       Add_Queue();
 
       // search queue
@@ -173,34 +176,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	  for (int i=0; i<3; i++) {
 	      U32Bytes tmp;
 	      memcpy(tmp.byte, ptr+i*4, 4);
-	      inputVel[i] = tmp.value;
-	      HAL_UART_Transmit(&huart2,(uint8_t *)tmp.byte,4,10);
+//	      inputVel[i] = tmp.value;
+	      pid_reset_setpoint(&motor[i].pid, tmp.value);
 	  }
-	  printf("\r\n");
+//	  printf("\r\n");
       }
-
-
-
-      // while
-	// if not exit \r\n
-      	  // skip
-	// if exit \r\n
-	  // copy inputVel
-
-
-//      for (int i=0; i<3; i++ ) {
-//	  U32Bytes tmp;
-//	  memcpy(tmp.byte, &rxBuffer[i*4], sizeof(float));
-//	  inputVel[i] = tmp.value;
-//      }
-//
-//      printf("%f%f%f\r\n", inputVel[0], inputVel[1], inputVel[2]);
   }
 }
 
 void Encoder2Velocity(void)
 {
-  volatile U32Bytes outputVel[3];
   // Read Encoder value and reset
   int16_t Enc_Buff1 = (int16_t)(TIM2->CNT);
   int16_t Enc_Buff2 = (int16_t)(TIM3->CNT);
@@ -209,40 +194,43 @@ void Encoder2Velocity(void)
   TIM3->CNT = 0;
   TIM4->CNT = 0;
 
-  //
-  velocity1 = 1.0;
-  velocity2 = -1.0;
-  velocity3 = 10.0;
+  motor[0].velocity = (Enc_Buff1/ENCODER_RESOLUSION)*CIRCUMFERENCE/INTERRUPT_PERIOD;
+  motor[1].velocity = (Enc_Buff2/ENCODER_RESOLUSION)*CIRCUMFERENCE/INTERRUPT_PERIOD;
+  motor[2].velocity = (Enc_Buff3/ENCODER_RESOLUSION)*CIRCUMFERENCE/INTERRUPT_PERIOD;
 
-  outputVel[0].value = velocity1;
-  outputVel[1].value = velocity2;
-  outputVel[2].value = velocity3;
+  U32Bytes outputVel[3];
+  outputVel[0].value = motor[0].velocity;
+  outputVel[1].value = motor[1].velocity;
+  outputVel[2].value = motor[2].velocity;
 
-//  HAL_UART_Transmit(&huart2,(uint8_t *)outputVel[0].byte,4,10);
-//  HAL_UART_Transmit(&huart2,(uint8_t *)outputVel[1].byte,4,10);
-//  HAL_UART_Transmit(&huart2,(uint8_t *)outputVel[2].byte,4,10);
-//  printf("\r\n");
+  for (int i=0; i<3; i++ ) {
+      HAL_UART_Transmit(&huart2,(uint8_t *)outputVel[i].byte,4,10);
+  }
+  printf("\r\n");
+//  printf("%f\r\n", motor[0].velocity);
+
 }
 
 void Control(void) {
-  float out = pid_iter(&pid1,velocity1);
-  if (out > 95) out = 90;
-  if (0 <= out && out <= 5) out = 5;
-  if (out < -95) out = -95;
-  if (-5 <= out && out < 0) out = -5;
+  for (int i=0; i<3; i++ ) {
+      float out = pid_iter(&motor[i].pid, motor[i].velocity);
 
-  if (out >= 0) {
-      out = 100 - out;
-      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, out); // forward
-      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 100);
-  } else {
-      out = 100 + out;
-      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 100); // forward
-      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, out);
+      if (out > 90) out = 90;
+      if (0 <= out && out <= 10) out = 0;
+      if (out < -90) out = -90;
+      if (-10 <= out && out < 0) out = 0;
+
+      if (out >= 0) {
+	  out = 100 - out;
+	  __HAL_TIM_SET_COMPARE(motor[i].forwardTim, motor[i].forwardTimChannel, out); // forward
+	  __HAL_TIM_SET_COMPARE(motor[i].backwardTim, motor[i].backwardTimChannel, 100);
+      } else {
+	  out = 100 + out;
+	  __HAL_TIM_SET_COMPARE(motor[i].forwardTim, motor[i].forwardTimChannel, 100); // forward
+	  __HAL_TIM_SET_COMPARE(motor[i].backwardTim, motor[i].backwardTimChannel, out);
+      }
   }
-
-//  printf("%f %f %f\r\n", 0.13, velocity1, 0.0);
-//  printf("%f\r\n", out);
+  printf("%lf %lf \r\n", motor[2].pid.setpoint, motor[2].velocity);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
@@ -254,13 +242,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   if (htim == &htim7) {
       Control();
   }
-}
-
-void read_encoder_value(void)
-{
-  uint16_t enc_buff = TIM3->CNT;
-  TIM3->CNT = 0;
-//  printf("%d\r\n", enc_buff);
 }
 
 int _write(int file, char *ptr, int len)
@@ -314,19 +295,19 @@ int main(void)
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_1); // backward
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 100);
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_2); // forward
-  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 20);
+  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 100);
 
   // PWM2
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_3); // forward
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 100);
   HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_4); // reverse
-  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, 20);
+  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, 100);
 
   // PWM3
   HAL_TIM_PWM_Start_IT(&htim16, TIM_CHANNEL_1); // forward
   __HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, 100);
   HAL_TIM_PWM_Start_IT(&htim17, TIM_CHANNEL_1); // reverse
-  __HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 20);
+  __HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 100);
 
   /* USER CODE END 2 */
 
@@ -336,7 +317,26 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
 
-  pid_init(&pid1, CONTROL_CYCLE, 2000, 100, 10, 0.13);
+  // Motor0
+  pid_init(&motor[0].pid, CONTROL_CYCLE, 500, 0, 0, 0.0);
+  motor[0].forwardTim = &htim1;
+  motor[0].forwardTimChannel = TIM_CHANNEL_2;
+  motor[0].backwardTim = &htim1;
+  motor[0].backwardTimChannel = TIM_CHANNEL_1;
+
+  // Motor1
+  pid_init(&motor[1].pid, CONTROL_CYCLE, 500, 0, 0, 0.0);
+  motor[1].forwardTim = &htim1;
+  motor[1].forwardTimChannel = TIM_CHANNEL_3;
+  motor[1].backwardTim = &htim1;
+  motor[1].backwardTimChannel = TIM_CHANNEL_4;
+
+  // Motor2
+  pid_init(&motor[2].pid, CONTROL_CYCLE, 500, 0, 0, 0.0);
+  motor[2].forwardTim = &htim17;
+  motor[2].forwardTimChannel = TIM_CHANNEL_1;
+  motor[2].backwardTim = &htim16;
+  motor[2].backwardTimChannel = TIM_CHANNEL_1;
 
   // Start interrupt
   HAL_TIM_Base_Start_IT(&htim6);
