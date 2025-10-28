@@ -213,24 +213,20 @@ void Encoder2Velocity(void)
 
 void Control(void) {
   for (int i=0; i<3; i++ ) {
+//      printf("%f %f %f %f %f\r\n", 0.0, motor[i].pid.setpoint, motor[i].velocity, 0.12, -0.12);
       float out = pid_iter(&motor[i].pid, motor[i].velocity);
-
-      if (out > 90) out = 90;
-      if (0 <= out && out <= 10) out = 0;
-      if (out < -90) out = -90;
-      if (-10 <= out && out < 0) out = 0;
 
       if (out >= 0) {
 	  out = 100 - out;
-	  __HAL_TIM_SET_COMPARE(motor[i].forwardTim, motor[i].forwardTimChannel, out); // forward
+	  __HAL_TIM_SET_COMPARE(motor[i].forwardTim, motor[i].forwardTimChannel, (int)(out)); // forward
 	  __HAL_TIM_SET_COMPARE(motor[i].backwardTim, motor[i].backwardTimChannel, 100);
       } else {
 	  out = 100 + out;
 	  __HAL_TIM_SET_COMPARE(motor[i].forwardTim, motor[i].forwardTimChannel, 100); // forward
-	  __HAL_TIM_SET_COMPARE(motor[i].backwardTim, motor[i].backwardTimChannel, out);
+	  __HAL_TIM_SET_COMPARE(motor[i].backwardTim, motor[i].backwardTimChannel, (int)(out));
       }
   }
-  printf("%lf %lf \r\n", motor[2].pid.setpoint, motor[2].velocity);
+//  printf("%lf %lf \r\n", motor[2].pid.setpoint, motor[2].velocity);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
@@ -318,21 +314,21 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
 
   // Motor0
-  pid_init(&motor[0].pid, CONTROL_CYCLE, 500, 0, 0, 0.0);
+  pid_init(&motor[0].pid, CONTROL_CYCLE, 1200, 5000, 10, 0.0);
   motor[0].forwardTim = &htim1;
   motor[0].forwardTimChannel = TIM_CHANNEL_2;
   motor[0].backwardTim = &htim1;
   motor[0].backwardTimChannel = TIM_CHANNEL_1;
 
   // Motor1
-  pid_init(&motor[1].pid, CONTROL_CYCLE, 500, 0, 0, 0.0);
+  pid_init(&motor[1].pid, CONTROL_CYCLE, 1200, 5000, 10, 0.0);
   motor[1].forwardTim = &htim1;
   motor[1].forwardTimChannel = TIM_CHANNEL_3;
   motor[1].backwardTim = &htim1;
   motor[1].backwardTimChannel = TIM_CHANNEL_4;
 
   // Motor2
-  pid_init(&motor[2].pid, CONTROL_CYCLE, 500, 0, 0, 0.0);
+  pid_init(&motor[2].pid, CONTROL_CYCLE, 1200, 5000, 10, 0.0);
   motor[2].forwardTim = &htim17;
   motor[2].forwardTimChannel = TIM_CHANNEL_1;
   motor[2].backwardTim = &htim16;

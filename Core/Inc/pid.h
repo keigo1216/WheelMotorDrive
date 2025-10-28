@@ -8,8 +8,9 @@ typedef struct PID {
   float cycle;
   float kp, ki, kd;
   float setpoint;
-  float integral;
-  float last_error;
+  float last_e_n;
+  float last_p_n;
+  float last_u_n;
 } PID;
 
 void pid_init(
