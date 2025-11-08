@@ -28,9 +28,9 @@ float pid_iter(
   float u_n = pid->last_u_n + delta_u_n_delta_t;
 
   if (u_n > 90) u_n = 90.0;
-  if (0 <= u_n && u_n <= 10) u_n = 0.0;
+  if (0 <= u_n && u_n <= 10) u_n = 10.0;
   if (u_n < -90) u_n = -90.0;
-  if (-10 <= u_n && u_n < 0) u_n = 0.0;
+  if (-10 <= u_n && u_n < 0) u_n = -10.0;
 
   pid->last_e_n = e_n;
   pid->last_p_n = p_n;

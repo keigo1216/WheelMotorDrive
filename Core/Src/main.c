@@ -213,8 +213,10 @@ void Encoder2Velocity(void)
 
 void Control(void) {
   for (int i=0; i<3; i++ ) {
+//      if (i > 0) continue;
 //      printf("%f %f %f %f %f\r\n", 0.0, motor[i].pid.setpoint, motor[i].velocity, 0.12, -0.12);
       float out = pid_iter(&motor[i].pid, motor[i].velocity);
+//      printf("%f %f %f %f %f\r\n", 0.0, motor[i].pid.setpoint, motor[i].velocity, 0.12, -0.12);
 
       if (out >= 0) {
 	  out = 100 - out;
@@ -314,21 +316,21 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
 
   // Motor0
-  pid_init(&motor[0].pid, CONTROL_CYCLE, 1200, 5000, 10, 0.0);
+  pid_init(&motor[0].pid, CONTROL_CYCLE, 500, 5000, 100, 0.0);
   motor[0].forwardTim = &htim1;
   motor[0].forwardTimChannel = TIM_CHANNEL_2;
   motor[0].backwardTim = &htim1;
   motor[0].backwardTimChannel = TIM_CHANNEL_1;
 
   // Motor1
-  pid_init(&motor[1].pid, CONTROL_CYCLE, 1200, 5000, 10, 0.0);
+  pid_init(&motor[1].pid, CONTROL_CYCLE, 500, 5000, 100, 0.0);
   motor[1].forwardTim = &htim1;
   motor[1].forwardTimChannel = TIM_CHANNEL_3;
   motor[1].backwardTim = &htim1;
   motor[1].backwardTimChannel = TIM_CHANNEL_4;
 
   // Motor2
-  pid_init(&motor[2].pid, CONTROL_CYCLE, 1200, 5000, 10, 0.0);
+  pid_init(&motor[2].pid, CONTROL_CYCLE, 500, 5000, 100, 0.0);
   motor[2].forwardTim = &htim17;
   motor[2].forwardTimChannel = TIM_CHANNEL_1;
   motor[2].backwardTim = &htim16;
@@ -342,6 +344,16 @@ int main(void)
   HAL_UART_Receive_DMA(&huart2, rxBuffer, PACKETSIZE); // buffersize=12 (32bit * 4 = 12byte)
   while (1)
   {
+//    pid_reset_setpoint(&motor[0].pid, 0.05);
+//    HAL_Delay(1000);
+//    pid_reset_setpoint(&motor[0].pid, 0.1);
+//    HAL_Delay(1000);
+//    pid_reset_setpoint(&motor[0].pid, 0.0);
+//    HAL_Delay(1000);
+//    pid_reset_setpoint(&motor[0].pid, -0.05);
+//    HAL_Delay(1000);
+//    pid_reset_setpoint(&motor[0].pid, -0.1);
+//    HAL_Delay(1000);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
